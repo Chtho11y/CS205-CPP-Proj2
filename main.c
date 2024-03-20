@@ -2,7 +2,10 @@
 #include<stdlib.h>
 #include<time.h>
 #include<string.h>
-#include<math.h>
+#include<stdalign.h>
+#include<xmmintrin.h>
+#include<immintrin.h>
+#include<math.h> 
 
 typedef float value_type;
 
@@ -52,6 +55,15 @@ void load_mat(mat_ptr mat){
     int n = mat->cols * mat->rows;
     for(int i = 0; i < n; i++)
         scanf("%f", mat->data + i);
+}
+
+void load_std_mat(mat_ptr mat){
+    char buf[20];
+    sprintf(buf, "data/%d.ans", (int)mat->cols);
+    FILE *in = fopen(buf, "r");
+    int n = mat->cols * mat->rows;
+    for(int i = 0; i < n; i++)
+        fscanf(in, "%f", mat->data + i);
 }
 
 void save_mat(mat_ptr mat, FILE *file){
@@ -134,8 +146,45 @@ mat_ptr mat_mul_openmp(mat_ptr a, mat_ptr b){
     return res;
 }
 
+mat_ptr mat_mul_simd(mat_ptr a, mat_ptr b){
+    mat_ptr res = malloc(sizeof(mat_t)), bt = trans_mat(b);
+    create_mat(res, a->rows, b->cols);
+    clear_mat(res);
+    int N = a->rows, M = a->cols, K = b->rows;
+
+    #pragma omp parallel for
+    for(int i = 0; i < N; i++)
+        for(int j = 0; j < K; j++){
+            __m256 sum = _mm256_setzero_ps();
+            value_type *a_ptr = &a->data[i * M];
+            value_type *bt_ptr = &bt->data[j * M];
+
+            for(int k = 0; k < M; k += 8)
+                sum = _mm256_fmadd_ps(_mm256_load_ps(a_ptr + k), _mm256_loadu_ps(bt_ptr + k), sum);
+            int tmp = 0;
+            for(int i = 0; i < 8; ++i)
+                tmp += sum[i];
+            res->data[i * K + j] = tmp;
+        }
+    destroy_mat(bt);
+    return res;
+}
+
+mat_ptr mat_mul_block(mat_ptr a, mat_ptr b){
+    mat_ptr res = malloc(sizeof(mat_t)), bt = trans_mat(b);
+    create_mat(res, a->rows, b->cols);
+    clear_mat(res);
+
+    int N = a->rows, M = a->cols, K = b->rows;
+    
+    destroy_mat(bt);
+    return res;
+}
+
 const char *test_name;
 int begin_cl;
+mat_ptr std;
+
 void begin_testcase(const char *name){
     test_name = name;
     begin_cl = clock();
@@ -157,9 +206,10 @@ int main(){
         m = k = n;    
         create_mat(mat_a, n, m);
         create_mat(mat_b, m, k);
+        create_mat(std, n, k);
         load_mat(mat_a);
         load_mat(mat_b);
-
+        load_std_mat(std);
     end_testcase();
 
     // begin_testcase("very naive mul");
@@ -174,5 +224,8 @@ int main(){
         mat_ptr res3 = mat_mul_openmp(mat_a, mat_b);
     end_testcase();
 
-    
+    begin_testcase("simd mul");
+        mat_ptr res4 = mat_mul_simd(mat_a, mat_b);
+    end_testcase();    
+    log_info("max eps = %.6f\n", cmp_mat(res3, std));
 }
