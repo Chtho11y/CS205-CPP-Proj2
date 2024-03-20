@@ -158,10 +158,9 @@ mat_ptr mat_mul_simd(mat_ptr a, mat_ptr b){
             __m256 sum = _mm256_setzero_ps();
             value_type *a_ptr = &a->data[i * M];
             value_type *bt_ptr = &bt->data[j * M];
-
             for(int k = 0; k < M; k += 8)
-                sum = _mm256_fmadd_ps(_mm256_load_ps(a_ptr + k), _mm256_loadu_ps(bt_ptr + k), sum);
-            int tmp = 0;
+                sum = _mm256_fmadd_ps(_mm256_loadu_ps(a_ptr + k), _mm256_loadu_ps(bt_ptr + k), sum);
+            value_type tmp = 0;
             for(int i = 0; i < 8; ++i)
                 tmp += sum[i];
             res->data[i * K + j] = tmp;
@@ -183,7 +182,7 @@ mat_ptr mat_mul_block(mat_ptr a, mat_ptr b){
 
 const char *test_name;
 int begin_cl;
-mat_ptr std;
+mat_t std;
 
 void begin_testcase(const char *name){
     test_name = name;
@@ -191,13 +190,16 @@ void begin_testcase(const char *name){
     log_info("Test case %s begin.\n", name);
 }
 
-void end_testcase(){
+void end_testcase(mat_ptr res){
     int duration = clock() - begin_cl;
-    log_info("Test case '%s' end in %d ms\n", test_name, duration);
-    log_save("Test case '%s': %d ms\n", test_name, duration);
+    double eps = cmp_mat(res, std);
+    log_info("Test case '%s' end in %d ms, max delta = %.6f\n", test_name, duration, eps);
+    log_save("Test case '%s': %d ms, delta = %.6f\n", test_name, duration, eps);
 }
 
 int main(){
+
+    freopen("data/4096.txt", "r", stdin);
     mat_t mat_a, mat_b;
     
     begin_testcase("load matrix");
@@ -210,7 +212,7 @@ int main(){
         load_mat(mat_a);
         load_mat(mat_b);
         load_std_mat(std);
-    end_testcase();
+    end_testcase(std);
 
     // begin_testcase("very naive mul");
     //     mat_ptr res1 = mat_mul_very_naive(mat_a, mat_b);
@@ -220,12 +222,11 @@ int main(){
     //     mat_ptr res2 = mat_mul_trans(mat_a, mat_b);
     // end_testcase();
 
-    begin_testcase("openmp mul");
-        mat_ptr res3 = mat_mul_openmp(mat_a, mat_b);
-    end_testcase();
+    // begin_testcase("openmp mul");
+    //     mat_ptr res3 = mat_mul_openmp(mat_a, mat_b);
+    // end_testcase(res3);
 
     begin_testcase("simd mul");
         mat_ptr res4 = mat_mul_simd(mat_a, mat_b);
-    end_testcase();    
-    log_info("max eps = %.6f\n", cmp_mat(res3, std));
+    end_testcase(res4);    
 }
