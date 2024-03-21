@@ -107,6 +107,18 @@ mat_ptr mat_mul_very_naive(mat_ptr a, mat_ptr b){
     return res;
 }
 
+mat_ptr mat_mul_naive(mat_ptr a, mat_ptr b){
+    mat_ptr res = malloc(sizeof(mat_t));
+    create_mat(res, a->rows, b->cols);
+    clear_mat(res);
+    int N = a->rows, M = a->cols, K = b->cols;
+    for(int i = 0; i < N; i++)
+        for(int k = 0; k < M; k++)
+            for(int j = 0; j < K; j++)
+                res->data[i * K + j] += a->data[i * M + k] * b->data[k * K + j];
+    return res;
+}
+
 mat_ptr mat_mul_trans(mat_ptr a, mat_ptr b){
     mat_ptr res = malloc(sizeof(mat_t)), bt = trans_mat(b);
     create_mat(res, a->rows, b->cols);
@@ -146,6 +158,24 @@ mat_ptr mat_mul_openmp(mat_ptr a, mat_ptr b){
     return res;
 }
 
+mat_ptr mat_mul_openmp2(mat_ptr a, mat_ptr b){
+    mat_ptr res = malloc(sizeof(mat_t));
+    create_mat(res, a->rows, b->cols);
+    clear_mat(res);
+    int N = a->rows, M = a->cols, K = b->cols;
+    #pragma omp parallel for
+    for(int i = 0; i < N; i++)
+        for(int k = 0; k < M; k++){
+            value_type v = a->data[i * M + k];
+            int ib = i * K;
+            int ik = k * K;
+            #pragma omp simd
+            for(int j = 0; j < K; j++)
+                res->data[ib + j] += v * b->data[ik + j];
+        }
+    return res;
+}
+
 mat_ptr mat_mul_simd(mat_ptr a, mat_ptr b){
     mat_ptr res = malloc(sizeof(mat_t)), bt = trans_mat(b);
     create_mat(res, a->rows, b->cols);
@@ -169,14 +199,56 @@ mat_ptr mat_mul_simd(mat_ptr a, mat_ptr b){
     return res;
 }
 
+#define BS 32
+
 mat_ptr mat_mul_block(mat_ptr a, mat_ptr b){
-    mat_ptr res = malloc(sizeof(mat_t)), bt = trans_mat(b);
+    mat_ptr res = malloc(sizeof(mat_t));
     create_mat(res, a->rows, b->cols);
     clear_mat(res);
 
-    int N = a->rows, M = a->cols, K = b->rows;
+    alignas(16) float A[BS][BS];
+    alignas(16) float B[BS][BS];
+    alignas(16) float C[BS][BS];
+
+    int N = a->rows, M = a->cols, K = b->cols;
+
+    #pragma omp parallel for private(A, B, C)
+    for(int bi = 0; bi < N; bi +=BS){
+        for(int bk = 0; bk < M; bk += BS){
+            
+            for(int i = 0; i < BS; ++i){
+                value_type* a_ptr  = a->data + (i + bi) * M + bk;
+                #pragma omp simd
+                for(int k = 0; k < BS; ++k)
+                    A[i][k] = a_ptr[k];
+            }
+
+            for(int bj = 0; bj < K; bj += BS){
+                memset(C, 0, sizeof(C));
+                for(int k = 0; k < BS; ++k){
+                    value_type* b_ptr = b->data + (k + bk) * K + bj;
+                    #pragma omp simd
+                    for(int j = 0; j < BS; ++j)
+                        B[k][j] = b_ptr[j];
+                }
+                for(int i = 0; i < BS; ++i)
+                    for(int k = 0; k < BS; ++k){
+                        value_type v = A[i][k];
+                        #pragma omp simd
+                        for(int j = 0; j < BS; ++j)
+                            C[i][j] += v * B[k][j];
+                    }
+                
+                for(int i = 0; i < BS; ++i){
+                    value_type* res_ptr = res->data + (i + bi) * K + bj;
+                    #pragma omp simd
+                    for(int j = 0; j < BS; ++j)
+                        res_ptr[j] += C[i][j];
+                }
+            }
+        }
+    }
     
-    destroy_mat(bt);
     return res;
 }
 
@@ -190,20 +262,21 @@ void begin_testcase(const char *name){
     log_info("Test case %s begin.\n", name);
 }
 
+int n, m, k;
+
 void end_testcase(mat_ptr res){
     int duration = clock() - begin_cl;
     double eps = cmp_mat(res, std);
-    log_info("Test case '%s' end in %d ms, max delta = %.6f\n", test_name, duration, eps);
+    log_info("Test case '%s' end in %d ms, max delta = %.6f, GFLOPS = %.2f\n", test_name, duration, eps, (double)n * n * n / duration / 1e6);
     log_save("Test case '%s': %d ms, delta = %.6f\n", test_name, duration, eps);
 }
 
 int main(){
 
-    freopen("data/4096.txt", "r", stdin);
+    // freopen("data/4096.txt", "r", stdin);
     mat_t mat_a, mat_b;
     
     begin_testcase("load matrix");
-        int n, m, k;
         scanf("%d", &n);
         m = k = n;    
         create_mat(mat_a, n, m);
@@ -216,17 +289,21 @@ int main(){
 
     // begin_testcase("very naive mul");
     //     mat_ptr res1 = mat_mul_very_naive(mat_a, mat_b);
-    // end_testcase();
+    // end_testcase(res1);
+
+    // begin_testcase("naive mul");
+    //     mat_ptr res2 = mat_mul_naive(mat_a, mat_b);
+    // end_testcase(res2);
 
     // begin_testcase("transpose mul");
-    //     mat_ptr res2 = mat_mul_trans(mat_a, mat_b);
-    // end_testcase();
-
-    // begin_testcase("openmp mul");
-    //     mat_ptr res3 = mat_mul_openmp(mat_a, mat_b);
+    //     mat_ptr res3 = mat_mul_trans(mat_a, mat_b);
     // end_testcase(res3);
 
-    begin_testcase("simd mul");
-        mat_ptr res4 = mat_mul_simd(mat_a, mat_b);
-    end_testcase(res4);    
+    begin_testcase("openmp mul");
+        mat_ptr res4 = mat_mul_openmp(mat_a, mat_b);
+    end_testcase(res4);
+
+    begin_testcase("openmp2 mul");
+        mat_ptr res5 = mat_mul_openmp2(mat_a, mat_b);
+    end_testcase(res5);    
 }
