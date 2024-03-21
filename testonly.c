@@ -5,7 +5,8 @@
 #include<stdalign.h>
 #include<xmmintrin.h>
 #include<immintrin.h>
-#include<math.h> 
+#include<math.h>
+#include<unistd.h>
 
 double get_clock(){
     struct timespec tim;
@@ -25,23 +26,6 @@ typedef struct _matrix{
     fprintf(stderr, str,##__VA_ARGS__)
 #define log_save(str, ...)\
     printf(str,##__VA_ARGS__)
-
-
-FILE *data_in;
-
-__attribute__((constructor))
-void init(){
-    log_info("C matmul start.\n");
-    srand(time(0));
-
-    // data_in = fopen("data/data.in", "r");
-}
-
-__attribute__((destructor))
-void finish(){
-    log_info("C matmul end.\n");
-    //fclose(data);
-}
 
 void create_mat(mat_ptr mat, size_t rows, size_t cols){
     mat->data = malloc(rows * cols * sizeof(value_type));
@@ -288,7 +272,18 @@ mat_ptr mat_mul_block(mat_ptr a, mat_ptr b){
 #define END_P 8192
 #define TEST_CNT 3
 
-const int STEP_CNT = ((END_P - START_P) / STEP) + 1;
+#define STEP_CNT (((END_P - START_P) / STEP) + 1)
+
+__attribute__((constructor))
+void init(){
+    log_info("C matmul start. RANGE = [%d, %d], STEP = %d\n", START_P, END_P, STEP);
+    srand(time(0));
+}
+
+__attribute__((destructor))
+void finish(){
+    log_info("C matmul end.\n");
+}
 
 const char *test_name;
 double tot_tim[STEP_CNT];
@@ -296,29 +291,40 @@ mat_t std;
 
 void begin_testcase(const char *name){
     test_name = name;
-    log_info("Test case %s begin.\n", name);
+    log_info("Test case '%s' begin.\n", name);
     for(int i = 0; i < STEP_CNT; ++i){
         tot_tim[i] = 0;
     }
 }
 
-#define BENCHMARK(name, proc)\
+void pretty_print(double v){
+    char buf[20];
+    sprintf(buf, "(%.2f)", v);
+    log_info("%9s", buf);
+}
+
+#define BENCHMARK(name)\
     begin_testcase(#name);\
     for(int i = START_P, id = 0; i <= END_P; i += STEP, ++id){\
         create_mat(mat_a, i, i);\
         create_mat(mat_b, i, i);\
+        log_info("##%02d %4d = ", id, i);\
         for(int tid = 0; tid <= TEST_CNT; ++tid){\
             load_mat(mat_a);\
             load_mat(mat_b);\
             double st = get_clock();\
-            res = name##proc(mat_a, mat_b);\
+            res = mat_mul_##name(mat_a, mat_b);\
             double ed = get_clock();\
-            if(tid)\
-                tot_tim[tid] += ed - st;\
+            if(tid){\
+                tot_tim[id] += ed - st;\
+                log_info("%9.2f", ed - st);\
+            }else{\
+                pretty_print(ed - st);\
+            }\
             free_mat(res);\
         }\
-        tot_tim[tid] /= 3;\
-        log_info("## %d = %9.2f ms\n", tot_tim[tid]);\
+        tot_tim[id] /= 3;\
+        log_info(" => %9.2f ms\n", tot_tim[id]);\
         destroy_mat(mat_a);\
         destroy_mat(mat_b);\
     }\
@@ -332,6 +338,7 @@ void end_testcase(){
         log_save("%9.2f", tot_tim[i]);
     }
     log_save("\n");
+    sleep(3);
 }
 
 int main(){
@@ -343,5 +350,11 @@ int main(){
         log_save("%9d", i);
     }
     log_save("\n");
+
+    BENCHMARK(simd);
+    BENCHMARK(parallel);
+    BENCHMARK(openmp);
+    BENCHMARK(openmp_reorder);
+    BENCHMARK(block);
 }
     
