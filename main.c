@@ -288,17 +288,17 @@ int main(){
         load_std_mat(std);
     end_testcase(std);
 
-    begin_testcase("very naive mul");
-        mat_ptr res1 = mat_mul_very_naive(mat_a, mat_b);
-    end_testcase(res1);
+    // begin_testcase("very naive mul");
+    //     mat_ptr res1 = mat_mul_very_naive(mat_a, mat_b);
+    // end_testcase(res1);
 
     // begin_testcase("naive mul");
     //     mat_ptr res2 = mat_mul_naive(mat_a, mat_b);
     // end_testcase(res2);
 
-    // begin_testcase("transpose mul");
-    //     mat_ptr res3 = mat_mul_trans(mat_a, mat_b);
-    // end_testcase(res3);
+    begin_testcase("transpose mul");
+        mat_ptr res3 = mat_mul_trans(mat_a, mat_b);
+    end_testcase(res3);
 
     // begin_testcase("openmp mul");
     //     mat_ptr res4 = mat_mul_openmp(mat_a, mat_b);

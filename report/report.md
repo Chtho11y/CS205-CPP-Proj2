@@ -50,6 +50,8 @@
    $$
    可以发现 $\ln T$ 正比于 $\ln n$，直线拟合后比较 $\ln k$ 即可反映出效率差异。
 
+   ~~同时也避免一些样例用时过长画不下~~
+
    事实上这种办法遇到了一些问题，实际数据分析时会指出。
 
 2. 每秒浮点运算次数 $\text{FLOPS}$
@@ -88,5 +90,52 @@
 
    L1 - L3 缓存的速率均接近甚至超过 $1$ TBps，不太可能构成瓶颈，不作讨论。
 
-   
+测试均为极其理想的情况，然而实际运算过程中 CPU 和内存会相互制约，结果可能比二者理论性能都要差。
+
+## Part2 测试结果及分析
+
+注：C 语言使用一维数组模拟二维数组，即位于 $(i,j)$ 的元素实际下标为 $i \cdot cols + j$.
+
+#### 1. 普通乘法
+
+普通乘法按照公式，使用三重循环直接计算：
+
+C 语言：
+
+```c
+mat_ptr mat_mul_very_naive(mat_ptr a, mat_ptr b){
+    mat_ptr res = malloc(sizeof(mat_t));
+    create_mat(res, a->rows, b->cols);
+    clear_mat(res);
+    int N = a->rows, M = a->cols, K = b->cols;
+    for(int i = 0; i < N; i++)
+        for(int j = 0; j < K; j++)
+            for(int k = 0; k < M; k++)
+                res->data[i * K + j] += a->data[i * M + k] * b->data[k * K + j];
+    return res;
+}
+```
+
+Java：
+
+```java
+Matrix multiply_naive(Matrix mat){
+        int N = getRow();
+        int M = getCol();
+        int K = mat.getCol();
+        Matrix res = new Matrix(N, K);
+        for (int i = 0; i < N; i++) {
+            for (int j = 0; j < K; j++) {
+                for (int k = 0; k < M; k++) {
+                    res.data[i][j] += data[i][k] * mat.data[k][j];
+                }
+            }
+        }
+        return res;
+    }
+```
+
+用时：
+
+
 
