@@ -2,6 +2,7 @@
 /java
 /.vscode
 /.idea
+/tmp
 
 *.s
 tmp.cpp
