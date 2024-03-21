@@ -1,0 +1,9 @@
+/output
+/java
+/.vscode
+/.idea
+
+*.s
+tmp.cpp
+mat.c
+mat.cpp

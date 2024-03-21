@@ -206,9 +206,9 @@ mat_ptr mat_mul_block(mat_ptr a, mat_ptr b){
     create_mat(res, a->rows, b->cols);
     clear_mat(res);
 
-    alignas(16) float A[BS][BS];
-    alignas(16) float B[BS][BS];
-    alignas(16) float C[BS][BS];
+    alignas(64) float A[BS][BS];
+    alignas(64) float B[BS][BS];
+    alignas(64) float C[BS][BS];
 
     int N = a->rows, M = a->cols, K = b->cols;
 
@@ -267,8 +267,9 @@ int n, m, k;
 void end_testcase(mat_ptr res){
     int duration = clock() - begin_cl;
     double eps = cmp_mat(res, std);
-    log_info("Test case '%s' end in %d ms, max delta = %.6f, GFLOPS = %.2f\n", test_name, duration, eps, (double)n * n * n / duration / 1e6);
-    log_save("Test case '%s': %d ms, delta = %.6f\n", test_name, duration, eps);
+    double gflops = (double)n * n * n * 2e-6 / duration;
+    log_info("Test case '%s' end in %d ms, max delta = %.6f, GFLOPS = %.2f\n", test_name, duration, eps, gflops);
+    log_save("Test case '%s': %d ms, GFLOPS = %.2f, delta = %.6f\n", test_name, duration, gflops, eps);
 }
 
 int main(){
@@ -306,4 +307,8 @@ int main(){
     begin_testcase("openmp2 mul");
         mat_ptr res5 = mat_mul_openmp2(mat_a, mat_b);
     end_testcase(res5);    
+
+    begin_testcase("block mul");
+        mat_ptr res6 = mat_mul_block(mat_a, mat_b);
+    end_testcase(res6);
 }
