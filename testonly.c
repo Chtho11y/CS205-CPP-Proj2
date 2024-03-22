@@ -267,9 +267,9 @@ mat_ptr mat_mul_block(mat_ptr a, mat_ptr b){
     return res;
 }
 
-#define START_P 512
-#define STEP 512
-#define END_P 8192
+#define START_P 128
+#define STEP 128
+#define END_P 2048
 #define TEST_CNT 3
 
 #define STEP_CNT (((END_P - START_P) / STEP) + 1)
@@ -342,7 +342,6 @@ void end_testcase(){
 }
 
 int main(){
-    freopen("bin.txt", "w", stdout);
     mat_t mat_a, mat_b;
     mat_ptr res;
     log_save("%15s", "N");
@@ -351,10 +350,14 @@ int main(){
     }
     log_save("\n");
 
-    BENCHMARK(simd);
-    BENCHMARK(parallel);
-    BENCHMARK(openmp);
-    BENCHMARK(openmp_reorder);
-    BENCHMARK(block);
+    BENCHMARK(naive);
+    BENCHMARK(trans);
+    BENCHMARK(reorder);
+    
+    // BENCHMARK(simd);
+    // BENCHMARK(parallel);
+    // BENCHMARK(openmp);
+    // BENCHMARK(openmp_reorder);
+    // BENCHMARK(block);
 }
     

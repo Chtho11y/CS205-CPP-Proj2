@@ -94,6 +94,12 @@
 
 ## Part2 测试结果及分析
 
+编译命令：
+
+```
+gcc -Wall -Wextra -fopenmp -mavx -mavx2 -mfma (-O2|-O3) ../main.c -o main.exe
+```
+
 注：C 语言使用一维数组模拟二维数组，即位于 $(i,j)$ 的元素实际下标为 $i \cdot cols + j$.
 
 #### 1. 普通乘法

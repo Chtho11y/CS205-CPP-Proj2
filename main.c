@@ -7,6 +7,12 @@
 #include<immintrin.h>
 #include<math.h> 
 
+double get_clock(){
+    struct timespec tim;
+    clock_gettime(CLOCK_MONOTONIC, &tim);
+    return tim.tv_sec * 1e3 + tim.tv_nsec / 1e6;
+}
+
 typedef float value_type;
 
 typedef struct _matrix{
@@ -253,28 +259,28 @@ mat_ptr mat_mul_block(mat_ptr a, mat_ptr b){
 }
 
 const char *test_name;
-int begin_cl;
+double begin_cl;
 mat_t std;
 
 void begin_testcase(const char *name){
     test_name = name;
-    begin_cl = clock();
+    begin_cl = get_clock();
     log_info("Test case %s begin.\n", name);
 }
 
 int n, m, k;
 
 void end_testcase(mat_ptr res){
-    int duration = clock() - begin_cl;
+    double duration = (get_clock() - begin_cl);
     double eps = cmp_mat(res, std);
     double gflops = (double)n * n * n * 2e-6 / duration;
-    log_info("Test case '%s' end in %d ms, max delta = %.6f, GFLOPS = %.2f\n", test_name, duration, eps, gflops);
-    log_save("Test case '%s': %d ms, GFLOPS = %.2f, delta = %.6f\n", test_name, duration, gflops, eps);
+    log_info("Test case '%s' end in %.2f ms, max delta = %.6f, GFLOPS = %.2f\n", test_name, duration, eps, gflops);
+    log_save("Test case '%s': %.2f ms, GFLOPS = %.2f, delta = %.6f\n", test_name, duration, gflops, eps);
 }
 
 int main(){
 
-    // freopen("data/4096.txt", "r", stdin);
+    // freopen("data/32.txt", "r", stdin);
     mat_t mat_a, mat_b;
     
     begin_testcase("load matrix");
@@ -296,19 +302,19 @@ int main(){
     //     mat_ptr res2 = mat_mul_naive(mat_a, mat_b);
     // end_testcase(res2);
 
-    begin_testcase("transpose mul");
-        mat_ptr res3 = mat_mul_trans(mat_a, mat_b);
-    end_testcase(res3);
+    // begin_testcase("transpose mul");
+    //     mat_ptr res3 = mat_mul_trans(mat_a, mat_b);
+    // end_testcase(res3);
 
-    // begin_testcase("openmp mul");
-    //     mat_ptr res4 = mat_mul_openmp(mat_a, mat_b);
-    // end_testcase(res4);
+    begin_testcase("openmp mul");
+        mat_ptr res4 = mat_mul_openmp(mat_a, mat_b);
+    end_testcase(res4);
 
-    // begin_testcase("openmp2 mul");
-    //     mat_ptr res5 = mat_mul_openmp2(mat_a, mat_b);
-    // end_testcase(res5);    
+    begin_testcase("openmp2 mul");
+        mat_ptr res5 = mat_mul_openmp2(mat_a, mat_b);
+    end_testcase(res5);    
 
-    // begin_testcase("block mul");
-    //     mat_ptr res6 = mat_mul_block(mat_a, mat_b);
-    // end_testcase(res6);
+    begin_testcase("block mul");
+        mat_ptr res6 = mat_mul_block(mat_a, mat_b);
+    end_testcase(res6);
 }

@@ -20,9 +20,9 @@ std::string file_nout(){
 }
 
 int main(){
-    for(int i = (1<<5); i <= (1<<12); i <<= 1){
+    for(int i = (1<<7); i <= (1<<13); i <<= 1){
         std::cout << "N = " << i << std::endl;
-        std::string cmd_c = "main.exe" + file_in(i) + file_nout();
+        std::string cmd_c = "main.exe" + file_in(i) + file_cout(i);
         system(cmd_c.c_str());
         // std::string cmd_j = "java -jar main.jar" + file_in(i) + file_jout(i);
         // system(cmd_j.c_str());
