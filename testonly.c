@@ -33,6 +33,7 @@ void create_mat(mat_ptr mat, size_t rows, size_t cols){
     mat->cols = cols;
 }
 
+
 void clear_mat(mat_ptr mat){
     memset(mat->data, 0, mat->rows * mat->cols * sizeof(value_type));
 }
@@ -45,6 +46,7 @@ void free_mat(mat_ptr mat){
     destroy_mat(mat);
     free(mat);
 }
+
 
 void load_mat(mat_ptr mat){
     int n = mat->cols * mat->rows;
@@ -137,7 +139,7 @@ mat_ptr mat_mul_openmp(mat_ptr a, mat_ptr b){
     clear_mat(res);
     int N = a->rows, M = a->cols, K = b->rows;
 
-    #pragma omp parallel for
+    // #pragma omp parallel for
     for(int i = 0; i < N; i++)
         for(int j = 0; j < K; j++){
             value_type sum = 0;
@@ -214,7 +216,30 @@ mat_ptr mat_mul_simd(mat_ptr a, mat_ptr b){
     return res;
 }
 
-#define BS 32
+mat_ptr mat_mul_simd_reorder(mat_ptr a, mat_ptr b){
+    mat_ptr res = malloc(sizeof(mat_t));
+    create_mat(res, a->rows, b->cols);
+    clear_mat(res);
+    int N = a->rows, M = a->cols, K = b->rows;
+
+    for(int i = 0; i < N; i++)
+        for(int k = 0; k < M; k++){
+            int ib = i * K;
+            int ik = k * K;
+            
+            __m256 val = _mm256_set1_ps(a->data[i * M + k]);
+
+            for(int j = 0; j < K; j += 8){
+                value_type* p = res->data + ib + j;
+                _mm256_storeu_ps(p , 
+                    _mm256_fmadd_ps(val, _mm256_loadu_ps(b->data + ik + j), _mm256_loadu_ps(p))
+                );
+            }
+    }
+    return res;
+}
+
+#define BS 64
 
 mat_ptr mat_mul_block(mat_ptr a, mat_ptr b){
     mat_ptr res = malloc(sizeof(mat_t));
@@ -224,6 +249,10 @@ mat_ptr mat_mul_block(mat_ptr a, mat_ptr b){
     alignas(64) float A[BS][BS];
     alignas(64) float B[BS][BS];
     alignas(64) float C[BS][BS];
+
+    // float A[BS][BS];
+    // float B[BS][BS];
+    // float C[BS][BS];
 
     int N = a->rows, M = a->cols, K = b->cols;
 
@@ -267,16 +296,111 @@ mat_ptr mat_mul_block(mat_ptr a, mat_ptr b){
     return res;
 }
 
-<<<<<<< HEAD
+mat_ptr mat_mul_block_fast(mat_ptr a, mat_ptr b){
+    mat_ptr res = malloc(sizeof(mat_t));
+    create_mat(res, a->rows, b->cols);
+    clear_mat(res);
+
+    alignas(64) float A[BS][BS];
+    alignas(64) float B[BS][BS];
+    alignas(64) float C[BS][BS];
+
+    int N = a->rows, M = a->cols, K = b->cols;
+
+    #pragma omp parallel for private(A, B, C)
+    for(int bi = 0; bi < N; bi += BS){
+        for(int bk = 0; bk < M; bk += BS){
+            
+            for(int i = 0; i < BS; ++i){
+                value_type* a_ptr  = a->data + (i + bi) * M + bk;
+                #pragma omp simd
+                for(int k = 0; k < BS; ++k)
+                    A[i][k] = a_ptr[k];
+            }
+
+            for(int bj = 0; bj < K; bj += BS){
+                memset(C, 0, sizeof(C));
+                for(int k = 0; k < BS; ++k){
+                    value_type* b_ptr = b->data + (k + bk) * K + bj;
+                    #pragma omp simd
+                    for(int j = 0; j < BS; ++j)
+                        B[k][j] = b_ptr[j];
+                }
+
+                // for(int i = 0; i < BS; ++i)
+                //     for(int k = 0; k < BS; k += 4){
+                //         value_type v1 = A[i][k];
+                //         value_type v2 = A[i][k + 1];
+                //         value_type v3 = A[i][k + 2];
+                //         value_type v4 = A[i][k + 3];
+                //         value_type *cptr = C[i];
+                //         #pragma omp simd
+                //         for(int j = 0; j < BS; ++j){
+                //             value_type t = 0;
+                //             t += v1 * B[k][j];
+                //             t += v2 * B[k + 1][j];
+                //             t += v3 * B[k + 2][j];
+                //             t += v4 * B[k + 3][j];
+                //             cptr[j] += t;
+                //         }
+                //     }
+
+                for(int i = 0; i < BS; i += 2)
+                    for(int k = 0; k < BS; k += 4){
+                        value_type v01 = A[i][k], v02 = A[i][k + 1], v03 = A[i][k + 2], v04 = A[i][k + 3];
+                        value_type v11 = A[i + 1][k], v12 = A[i + 1][k + 1], v13 = A[i + 1][k + 2], v14 = A[i + 1][k + 3];
+                        #pragma omp simd
+                        for(int j = 0; j < BS; ++j){
+                            value_type t1 = 0 , t2 = 0;
+                            // value_type b1 = B[k][j], b2 = B[k + 1][j], b3 = B[k + 2][j], b4 = B[k + 3][j];
+
+                            t1 += v01 * B[k][j];
+                            t2 += v11 * B[k][j];
+                            
+                            t1 += v02 * B[k + 1][j];
+                            t2 += v12 * B[k + 1][j];
+
+                            t1 += v03 * B[k + 2][j];
+                            t2 += v13 * B[k + 2][j];
+
+                            t1 += v04 * B[k + 3][j];
+                            t2 += v14 * B[k + 3][j];
+
+                            C[i][j] += t1;
+                            C[i + 1][j] += t2;
+                        }
+                    }
+                
+                for(int i = 0; i < BS; ++i){
+                    value_type* res_ptr = res->data + (i + bi) * K + bj;
+                    #pragma omp simd
+                    for(int j = 0; j < BS; ++j)
+                        res_ptr[j] += C[i][j];
+                }
+            }
+        }
+    }
+    
+    return res;
+}
+
+// #define SLOW_TEST
+
+#ifdef SLOW_TEST
+
 #define START_P 128
 #define STEP 128
 #define END_P 2048
-=======
-#define START_P 4096
-#define STEP 4096
-#define END_P 16384
->>>>>>> e2bbef1beab25c10b6121144971d3175021bbe20
 #define TEST_CNT 3
+
+#else
+
+#define START_P 256
+#define STEP 256
+#define END_P 4096
+#define TEST_CNT 3
+
+#endif
 
 #define STEP_CNT (((END_P - START_P) / STEP) + 1)
 
@@ -330,7 +454,7 @@ void pretty_print(double v){
             free_mat(res);\
         }\
         tot_tim[id] /= 3;\
-        log_info(" => %9.2f ms\n", tot_tim[id]);\
+        log_info(" => %9.2f ms(%.2f GFLOPS)\n", tot_tim[id], 2e-6 * i * i * i / tot_tim[id]);\
         destroy_mat(mat_a);\
         destroy_mat(mat_b);\
     }\
@@ -341,7 +465,7 @@ int n, m, k;
 void end_testcase(){
     printf("%15s ",test_name);
     for(int i = 0; i < STEP_CNT; ++i){
-        log_save("%9.2f", tot_tim[i]);
+        log_save("%.2f%c", tot_tim[i],", "[i == STEP_CNT - 1]);
     }
     log_save("\n");
     sleep(3);
@@ -356,21 +480,23 @@ int main(){
     }
     log_save("\n");
 
-<<<<<<< HEAD
-    BENCHMARK(naive);
-    BENCHMARK(trans);
-    BENCHMARK(reorder);
-    
-=======
->>>>>>> e2bbef1beab25c10b6121144971d3175021bbe20
+    #ifdef SLOW_TEST
+
+    // BENCHMARK(naive);
+    // BENCHMARK(trans);
+    // BENCHMARK(reorder);
     // BENCHMARK(simd);
-    // BENCHMARK(parallel);
-    // BENCHMARK(openmp);
-    // BENCHMARK(openmp_reorder);
-<<<<<<< HEAD
+    // BENCHMARK(simd_reorder);
     // BENCHMARK(block);
-=======
+    // BENCHMARK(openmp_reorder);
+    #else
+
+    BENCHMARK(openmp);
+    BENCHMARK(parallel);
+    BENCHMARK(openmp_reorder);
     BENCHMARK(block);
->>>>>>> e2bbef1beab25c10b6121144971d3175021bbe20
+    BENCHMARK(block_fast);
+    #endif
 }
-    
+
+//opt2  0.76,4.02,9.53,24.99,42.98,60.54,107.50,157.64,197.13,305.01,388.68,495.35,673.30,891.07,1139.67,1733.80
