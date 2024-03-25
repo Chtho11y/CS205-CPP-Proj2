@@ -267,9 +267,15 @@ mat_ptr mat_mul_block(mat_ptr a, mat_ptr b){
     return res;
 }
 
+<<<<<<< HEAD
 #define START_P 128
 #define STEP 128
 #define END_P 2048
+=======
+#define START_P 4096
+#define STEP 4096
+#define END_P 16384
+>>>>>>> e2bbef1beab25c10b6121144971d3175021bbe20
 #define TEST_CNT 3
 
 #define STEP_CNT (((END_P - START_P) / STEP) + 1)
@@ -350,14 +356,21 @@ int main(){
     }
     log_save("\n");
 
+<<<<<<< HEAD
     BENCHMARK(naive);
     BENCHMARK(trans);
     BENCHMARK(reorder);
     
+=======
+>>>>>>> e2bbef1beab25c10b6121144971d3175021bbe20
     // BENCHMARK(simd);
     // BENCHMARK(parallel);
     // BENCHMARK(openmp);
     // BENCHMARK(openmp_reorder);
+<<<<<<< HEAD
     // BENCHMARK(block);
+=======
+    BENCHMARK(block);
+>>>>>>> e2bbef1beab25c10b6121144971d3175021bbe20
 }
     
