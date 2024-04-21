@@ -5,7 +5,9 @@
 #include<stdalign.h>
 #include<xmmintrin.h>
 #include<immintrin.h>
-#include<math.h> 
+#include<math.h>
+#include<unistd.h>
+// #include "include/cblas.h"
 
 double get_clock(){
     struct timespec tim;
@@ -26,28 +28,12 @@ typedef struct _matrix{
 #define log_save(str, ...)\
     printf(str,##__VA_ARGS__)
 
-
-FILE *data_in;
-
-__attribute__((constructor))
-void init(){
-    log_info("C matmul start.\n");
-    srand(time(0));
-
-    // data_in = fopen("data/data.in", "r");
-}
-
-__attribute__((destructor))
-void finish(){
-    log_info("C matmul end.\n");
-    //fclose(data);
-}
-
 void create_mat(mat_ptr mat, size_t rows, size_t cols){
     mat->data = malloc(rows * cols * sizeof(value_type));
     mat->rows = rows;
     mat->cols = cols;
 }
+
 
 void clear_mat(mat_ptr mat){
     memset(mat->data, 0, mat->rows * mat->cols * sizeof(value_type));
@@ -57,10 +43,16 @@ void destroy_mat(mat_ptr mat){
     free(mat->data);
 }
 
+void free_mat(mat_ptr mat){
+    destroy_mat(mat);
+    free(mat);
+}
+
+
 void load_mat(mat_ptr mat){
     int n = mat->cols * mat->rows;
     for(int i = 0; i < n; i++)
-        scanf("%f", mat->data + i);
+        mat->data[i] = (float)rand() / RAND_MAX;
 }
 
 void load_std_mat(mat_ptr mat){
@@ -101,7 +93,7 @@ mat_ptr trans_mat(mat_ptr mat){
     return res;
 }
 
-mat_ptr mat_mul_very_naive(mat_ptr a, mat_ptr b){
+mat_ptr mat_mul_naive(mat_ptr a, mat_ptr b){
     mat_ptr res = malloc(sizeof(mat_t));
     create_mat(res, a->rows, b->cols);
     clear_mat(res);
@@ -113,7 +105,7 @@ mat_ptr mat_mul_very_naive(mat_ptr a, mat_ptr b){
     return res;
 }
 
-mat_ptr mat_mul_naive(mat_ptr a, mat_ptr b){
+mat_ptr mat_mul_reorder(mat_ptr a, mat_ptr b){
     mat_ptr res = malloc(sizeof(mat_t));
     create_mat(res, a->rows, b->cols);
     clear_mat(res);
@@ -138,7 +130,7 @@ mat_ptr mat_mul_trans(mat_ptr a, mat_ptr b){
             for(int k = 0; k < M; k++)
                 *res_ptr += a_ptr[k] * bt_ptr[k];
         }
-    destroy_mat(bt);
+    free_mat(bt);
     return res;
 }
 
@@ -160,11 +152,32 @@ mat_ptr mat_mul_openmp(mat_ptr a, mat_ptr b){
                 sum += a_ptr[k] * bt_ptr[k];
             res->data[i * K + j] = sum;
         }
-    destroy_mat(bt);
+    free_mat(bt);
     return res;
 }
 
-mat_ptr mat_mul_openmp2(mat_ptr a, mat_ptr b){
+mat_ptr mat_mul_parallel(mat_ptr a, mat_ptr b){
+    mat_ptr res = malloc(sizeof(mat_t)), bt = trans_mat(b);
+    create_mat(res, a->rows, b->cols);
+    clear_mat(res);
+    int N = a->rows, M = a->cols, K = b->rows;
+
+    #pragma omp parallel for
+    for(int i = 0; i < N; i++)
+        for(int j = 0; j < K; j++){
+            value_type sum = 0;
+            value_type *a_ptr = &a->data[i * M];
+            value_type *bt_ptr = &bt->data[j * M];
+
+            for(int k = 0; k < M; k++)
+                sum += a_ptr[k] * bt_ptr[k];
+            res->data[i * K + j] = sum;
+        }
+    free_mat(bt);
+    return res;
+}
+
+mat_ptr mat_mul_openmp_reorder(mat_ptr a, mat_ptr b){
     mat_ptr res = malloc(sizeof(mat_t));
     create_mat(res, a->rows, b->cols);
     clear_mat(res);
@@ -183,6 +196,28 @@ mat_ptr mat_mul_openmp2(mat_ptr a, mat_ptr b){
 }
 
 mat_ptr mat_mul_simd(mat_ptr a, mat_ptr b){
+    mat_ptr res = malloc(sizeof(mat_t)), bt = trans_mat(b);
+    create_mat(res, a->rows, b->cols);
+    clear_mat(res);
+    int N = a->rows, M = a->cols, K = b->rows;
+
+    for(int i = 0; i < N; i++)
+        for(int j = 0; j < K; j++){
+            __m256 sum = _mm256_setzero_ps();
+            value_type *a_ptr = &a->data[i * M];
+            value_type *bt_ptr = &bt->data[j * M];
+            for(int k = 0; k < M; k += 8)
+                sum = _mm256_fmadd_ps(_mm256_loadu_ps(a_ptr + k), _mm256_loadu_ps(bt_ptr + k), sum);
+            value_type tmp = 0;
+            for(int i = 0; i < 8; ++i)
+                tmp += sum[i];
+            res->data[i * K + j] = tmp;
+        }
+    free_mat(bt);
+    return res;
+}
+
+mat_ptr mat_mul_simd_reorder(mat_ptr a, mat_ptr b){
     mat_ptr res = malloc(sizeof(mat_t));
     create_mat(res, a->rows, b->cols);
     clear_mat(res);
@@ -196,15 +231,16 @@ mat_ptr mat_mul_simd(mat_ptr a, mat_ptr b){
             __m256 val = _mm256_set1_ps(a->data[i * M + k]);
 
             for(int j = 0; j < K; j += 8){
-                _mm256_storeu_ps(res->data + ib + j , 
-                    _mm256_fmadd_ps(val, _mm256_loadu_ps(b->data + ik + j), _mm256_loadu_ps(res->data + ib + j))
+                value_type* p = res->data + ib + j;
+                _mm256_storeu_ps(p , 
+                    _mm256_fmadd_ps(val, _mm256_loadu_ps(b->data + ik + j), _mm256_loadu_ps(p))
                 );
             }
     }
     return res;
 }
 
-#define BS 32
+#define BS 64
 
 mat_ptr mat_mul_block(mat_ptr a, mat_ptr b){
     mat_ptr res = malloc(sizeof(mat_t));
@@ -214,6 +250,10 @@ mat_ptr mat_mul_block(mat_ptr a, mat_ptr b){
     alignas(64) float A[BS][BS];
     alignas(64) float B[BS][BS];
     alignas(64) float C[BS][BS];
+
+    // float A[BS][BS];
+    // float B[BS][BS];
+    // float C[BS][BS];
 
     int N = a->rows, M = a->cols, K = b->cols;
 
@@ -269,7 +309,7 @@ mat_ptr mat_mul_block_fast(mat_ptr a, mat_ptr b){
     int N = a->rows, M = a->cols, K = b->cols;
 
     #pragma omp parallel for private(A, B, C)
-    for(int bi = 0; bi < N; bi +=BS){
+    for(int bi = 0; bi < N; bi += BS){
         for(int bk = 0; bk < M; bk += BS){
             
             for(int i = 0; i < BS; ++i){
@@ -305,44 +345,6 @@ mat_ptr mat_mul_block_fast(mat_ptr a, mat_ptr b){
                 //             cptr[j] += t;
                 //         }
                 //     }
-                
-                // for(int i = 0; i < BS; i += 4)
-                //     for(int k = 0; k < BS; k += 4){
-                //         value_type v01 = A[i][k], v02 = A[i][k + 1], v03 = A[i][k + 2], v04 = A[i][k + 3];
-                //         value_type v11 = A[i + 1][k], v12 = A[i + 1][k + 1], v13 = A[i + 1][k + 2], v14 = A[i + 1][k + 3];
-                //         value_type v21 = A[i + 2][k], v22 = A[i + 2][k + 1], v23 = A[i + 2][k + 2], v24 = A[i + 2][k + 3];
-                //         value_type v31 = A[i + 3][k], v32 = A[i + 3][k + 1], v33 = A[i + 3][k + 2], v34 = A[i + 3][k + 3];
-                //         #pragma omp simd
-                //         for(int j = 0; j < BS; ++j){
-                //             value_type t1 = 0 , t2 = 0, t3 = 0, t4 = 0;
-                //             value_type b1 = B[k][j], b2 = B[k + 1][j], b3 = B[k + 2][j], b4 = B[k + 3][j];
-
-                //             t1 += v01 * b1;
-                //             t2 += v11 * b1;
-                //             t3 += v21 * b1;
-                //             t4 += v31 * b1;
-                            
-                //             t1 += v02 * b2;
-                //             t2 += v12 * b2;
-                //             t3 += v22 * b2;
-                //             t4 += v32 * b2;
-
-                //             t1 += v03 * b3;
-                //             t2 += v13 * b3;
-                //             t3 += v23 * b3;
-                //             t4 += v33 * b3;
-                            
-                //             t1 += v04 * b4;
-                //             t2 += v14 * b4;
-                //             t3 += v24 * b4;
-                //             t4 += v34 * b4;
-
-                //             C[i][j] += t1;
-                //             C[i + 1][j] += t2;
-                //             C[i + 2][j] += t3;
-                //             C[i + 3][j] += t4;
-                //         }
-                //     }
 
                 for(int i = 0; i < BS; i += 2)
                     for(int k = 0; k < BS; k += 4){
@@ -351,19 +353,19 @@ mat_ptr mat_mul_block_fast(mat_ptr a, mat_ptr b){
                         #pragma omp simd
                         for(int j = 0; j < BS; ++j){
                             value_type t1 = 0 , t2 = 0;
-                            value_type b1 = B[k][j], b2 = B[k + 1][j], b3 = B[k + 2][j], b4 = B[k + 3][j];
+                            // value_type b1 = B[k][j], b2 = B[k + 1][j], b3 = B[k + 2][j], b4 = B[k + 3][j];
 
-                            t1 += v01 * b1;
-                            t2 += v11 * b1;
+                            t1 += v01 * B[k][j];
+                            t2 += v11 * B[k][j];
                             
-                            t1 += v02 * b2;
-                            t2 += v12 * b2;
+                            t1 += v02 * B[k + 1][j];
+                            t2 += v12 * B[k + 1][j];
 
-                            t1 += v03 * b3;
-                            t2 += v13 * b3;
+                            t1 += v03 * B[k + 2][j];
+                            t2 += v13 * B[k + 2][j];
 
-                            t1 += v04 * b4;
-                            t2 += v14 * b4;
+                            t1 += v04 * B[k + 3][j];
+                            t2 += v14 * B[k + 3][j];
 
                             C[i][j] += t1;
                             C[i + 1][j] += t2;
@@ -383,63 +385,133 @@ mat_ptr mat_mul_block_fast(mat_ptr a, mat_ptr b){
     return res;
 }
 
+// mat_ptr mat_mul_openblas(mat_ptr a, mat_ptr b){
+//     mat_ptr res = malloc(sizeof(mat_t));
+//     create_mat(res, a->rows, b->cols);
+//     clear_mat(res);
+
+//     cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, 
+//         a->rows, b->cols, a->cols, 
+//         1.0, a->data, a->cols, 
+//         b->data, b->cols, 0.0, 
+//         res->data, res->cols);
+
+//     return res;
+// }
+
+// #define SLOW_TEST
+
+#ifdef SLOW_TEST
+
+#define START_P 128
+#define STEP 128
+#define END_P 2048
+#define TEST_CNT 3
+
+#else
+
+#define START_P 256
+#define STEP 256
+#define END_P 4096
+#define TEST_CNT 3
+
+#endif
+
+#define STEP_CNT (((END_P - START_P) / STEP) + 1)
+
+__attribute__((constructor))
+void init(){
+    log_info("C matmul start. RANGE = [%d, %d], STEP = %d\n", START_P, END_P, STEP);
+    srand(time(0));
+}
+
+__attribute__((destructor))
+void finish(){
+    log_info("C matmul end.\n");
+}
+
 const char *test_name;
-double begin_cl;
+double tot_tim[STEP_CNT];
 mat_t std;
 
 void begin_testcase(const char *name){
     test_name = name;
-    begin_cl = get_clock();
-    log_info("Test case %s begin.\n", name);
+    log_info("Test case '%s' begin.\n", name);
+    for(int i = 0; i < STEP_CNT; ++i){
+        tot_tim[i] = 0;
+    }
 }
 
+void pretty_print(double v){
+    char buf[20];
+    sprintf(buf, "(%.2f)", v);
+    log_info("%9s", buf);
+}
+
+#define BENCHMARK(name)\
+    begin_testcase(#name);\
+    for(int i = START_P, id = 0; i <= END_P; i += STEP, ++id){\
+        create_mat(mat_a, i, i);\
+        create_mat(mat_b, i, i);\
+        log_info("##%02d %4d = ", id, i);\
+        for(int tid = 0; tid <= TEST_CNT; ++tid){\
+            load_mat(mat_a);\
+            load_mat(mat_b);\
+            double st = get_clock();\
+            res = mat_mul_##name(mat_a, mat_b);\
+            double ed = get_clock();\
+            if(tid){\
+                tot_tim[id] += ed - st;\
+                log_info("%9.2f", ed - st);\
+            }else{\
+                pretty_print(ed - st);\
+            }\
+            free_mat(res);\
+        }\
+        tot_tim[id] /= 3;\
+        log_info(" => %9.2f ms(%.2f GFLOPS)\n", tot_tim[id], 2e-6 * i * i * i / tot_tim[id]);\
+        destroy_mat(mat_a);\
+        destroy_mat(mat_b);\
+    }\
+    end_testcase()\
+    
 int n, m, k;
 
-void end_testcase(mat_ptr res){
-    double duration = (get_clock() - begin_cl);
-    double eps = cmp_mat(res, std);
-    double gflops = (double)n * n * n * 2e-6 / duration;
-    log_info("Test case '%s' end in %.2f ms, max delta = %.6f, GFLOPS = %.2f\n", test_name, duration, eps, gflops);
-    log_save("Test case '%s': %.2f ms, GFLOPS = %.2f, delta = %.6f\n", test_name, duration, gflops, eps);
+void end_testcase(){
+    printf("%15s ",test_name);
+    for(int i = 0; i < STEP_CNT; ++i){
+        log_save("%.2f%c", tot_tim[i],", "[i == STEP_CNT - 1]);
+    }
+    log_save("\n");
+    sleep(3);
 }
 
 int main(){
-
-    freopen("data/4096.txt", "r", stdin);
     mat_t mat_a, mat_b;
-    
-    begin_testcase("load matrix");
-        scanf("%d", &n);
-        m = k = n;    
-        create_mat(mat_a, n, m);
-        create_mat(mat_b, m, k);
-        create_mat(std, n, k);
-        load_mat(mat_a);
-        load_mat(mat_b);
-        load_std_mat(std);
-    end_testcase(std);
+    mat_ptr res;
+    log_save("%15s", "N");
+    for(int i = START_P; i <= END_P; i += STEP){
+        log_save("%9d", i);
+    }
+    log_save("\n");
 
-    // begin_testcase("very naive mul");
-    //     mat_ptr res1 = mat_mul_very_naive(mat_a, mat_b);
-    // end_testcase(res1);
+#ifdef SLOW_TEST
 
-    // begin_testcase("naive mul");
-    //     mat_ptr res2 = mat_mul_naive(mat_a, mat_b);
-    // end_testcase(res2);
+    // BENCHMARK(naive);
+    // BENCHMARK(trans);
+    // BENCHMARK(reorder);
+    // BENCHMARK(simd);
+    // BENCHMARK(simd_reorder);
+    // BENCHMARK(block);
+    // BENCHMARK(openmp_reorder);
 
-    // begin_testcase("transpose mul");
-    //     mat_ptr res3 = mat_mul_trans(mat_a, mat_b);
-    // end_testcase(res3);
+#else
 
-    // begin_testcase("simd mul");
-    //     mat_ptr res4 = mat_mul_simd(mat_a, mat_b);
-    // end_testcase(res4);
+    BENCHMARK(openmp);
+    BENCHMARK(parallel);
+    BENCHMARK(openmp_reorder);
+    BENCHMARK(block);
+    BENCHMARK(block_fast);
+#endif
 
-//     begin_testcase("openmp2 mul");
-//         mat_ptr res5 = mat_mul_openmp2(mat_a, mat_b);
-//     end_testcase(res5);    
-
-    begin_testcase("block mul");
-        mat_ptr res6 = mat_mul_block_fast(mat_a, mat_b);
-    end_testcase(res6);
 }
