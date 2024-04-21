@@ -183,25 +183,24 @@ mat_ptr mat_mul_openmp2(mat_ptr a, mat_ptr b){
 }
 
 mat_ptr mat_mul_simd(mat_ptr a, mat_ptr b){
-    mat_ptr res = malloc(sizeof(mat_t)), bt = trans_mat(b);
+    mat_ptr res = malloc(sizeof(mat_t));
     create_mat(res, a->rows, b->cols);
     clear_mat(res);
     int N = a->rows, M = a->cols, K = b->rows;
 
-    #pragma omp parallel for
     for(int i = 0; i < N; i++)
-        for(int j = 0; j < K; j++){
-            __m256 sum = _mm256_setzero_ps();
-            value_type *a_ptr = &a->data[i * M];
-            value_type *bt_ptr = &bt->data[j * M];
-            for(int k = 0; k < M; k += 8)
-                sum = _mm256_fmadd_ps(_mm256_loadu_ps(a_ptr + k), _mm256_loadu_ps(bt_ptr + k), sum);
-            value_type tmp = 0;
-            for(int i = 0; i < 8; ++i)
-                tmp += sum[i];
-            res->data[i * K + j] = tmp;
-        }
-    destroy_mat(bt);
+        for(int k = 0; k < M; k++){
+            int ib = i * K;
+            int ik = k * K;
+            
+            __m256 val = _mm256_set1_ps(a->data[i * M + k]);
+
+            for(int j = 0; j < K; j += 8){
+                _mm256_storeu_ps(res->data + ib + j , 
+                    _mm256_fmadd_ps(val, _mm256_loadu_ps(b->data + ik + j), _mm256_loadu_ps(res->data + ib + j))
+                );
+            }
+    }
     return res;
 }
 
@@ -258,6 +257,132 @@ mat_ptr mat_mul_block(mat_ptr a, mat_ptr b){
     return res;
 }
 
+mat_ptr mat_mul_block_fast(mat_ptr a, mat_ptr b){
+    mat_ptr res = malloc(sizeof(mat_t));
+    create_mat(res, a->rows, b->cols);
+    clear_mat(res);
+
+    alignas(64) float A[BS][BS];
+    alignas(64) float B[BS][BS];
+    alignas(64) float C[BS][BS];
+
+    int N = a->rows, M = a->cols, K = b->cols;
+
+    #pragma omp parallel for private(A, B, C)
+    for(int bi = 0; bi < N; bi +=BS){
+        for(int bk = 0; bk < M; bk += BS){
+            
+            for(int i = 0; i < BS; ++i){
+                value_type* a_ptr  = a->data + (i + bi) * M + bk;
+                #pragma omp simd
+                for(int k = 0; k < BS; ++k)
+                    A[i][k] = a_ptr[k];
+            }
+
+            for(int bj = 0; bj < K; bj += BS){
+                memset(C, 0, sizeof(C));
+                for(int k = 0; k < BS; ++k){
+                    value_type* b_ptr = b->data + (k + bk) * K + bj;
+                    #pragma omp simd
+                    for(int j = 0; j < BS; ++j)
+                        B[k][j] = b_ptr[j];
+                }
+
+                // for(int i = 0; i < BS; ++i)
+                //     for(int k = 0; k < BS; k += 4){
+                //         value_type v1 = A[i][k];
+                //         value_type v2 = A[i][k + 1];
+                //         value_type v3 = A[i][k + 2];
+                //         value_type v4 = A[i][k + 3];
+                //         value_type *cptr = C[i];
+                //         #pragma omp simd
+                //         for(int j = 0; j < BS; ++j){
+                //             value_type t = 0;
+                //             t += v1 * B[k][j];
+                //             t += v2 * B[k + 1][j];
+                //             t += v3 * B[k + 2][j];
+                //             t += v4 * B[k + 3][j];
+                //             cptr[j] += t;
+                //         }
+                //     }
+                
+                // for(int i = 0; i < BS; i += 4)
+                //     for(int k = 0; k < BS; k += 4){
+                //         value_type v01 = A[i][k], v02 = A[i][k + 1], v03 = A[i][k + 2], v04 = A[i][k + 3];
+                //         value_type v11 = A[i + 1][k], v12 = A[i + 1][k + 1], v13 = A[i + 1][k + 2], v14 = A[i + 1][k + 3];
+                //         value_type v21 = A[i + 2][k], v22 = A[i + 2][k + 1], v23 = A[i + 2][k + 2], v24 = A[i + 2][k + 3];
+                //         value_type v31 = A[i + 3][k], v32 = A[i + 3][k + 1], v33 = A[i + 3][k + 2], v34 = A[i + 3][k + 3];
+                //         #pragma omp simd
+                //         for(int j = 0; j < BS; ++j){
+                //             value_type t1 = 0 , t2 = 0, t3 = 0, t4 = 0;
+                //             value_type b1 = B[k][j], b2 = B[k + 1][j], b3 = B[k + 2][j], b4 = B[k + 3][j];
+
+                //             t1 += v01 * b1;
+                //             t2 += v11 * b1;
+                //             t3 += v21 * b1;
+                //             t4 += v31 * b1;
+                            
+                //             t1 += v02 * b2;
+                //             t2 += v12 * b2;
+                //             t3 += v22 * b2;
+                //             t4 += v32 * b2;
+
+                //             t1 += v03 * b3;
+                //             t2 += v13 * b3;
+                //             t3 += v23 * b3;
+                //             t4 += v33 * b3;
+                            
+                //             t1 += v04 * b4;
+                //             t2 += v14 * b4;
+                //             t3 += v24 * b4;
+                //             t4 += v34 * b4;
+
+                //             C[i][j] += t1;
+                //             C[i + 1][j] += t2;
+                //             C[i + 2][j] += t3;
+                //             C[i + 3][j] += t4;
+                //         }
+                //     }
+
+                for(int i = 0; i < BS; i += 2)
+                    for(int k = 0; k < BS; k += 4){
+                        value_type v01 = A[i][k], v02 = A[i][k + 1], v03 = A[i][k + 2], v04 = A[i][k + 3];
+                        value_type v11 = A[i + 1][k], v12 = A[i + 1][k + 1], v13 = A[i + 1][k + 2], v14 = A[i + 1][k + 3];
+                        #pragma omp simd
+                        for(int j = 0; j < BS; ++j){
+                            value_type t1 = 0 , t2 = 0;
+                            value_type b1 = B[k][j], b2 = B[k + 1][j], b3 = B[k + 2][j], b4 = B[k + 3][j];
+
+                            t1 += v01 * b1;
+                            t2 += v11 * b1;
+                            
+                            t1 += v02 * b2;
+                            t2 += v12 * b2;
+
+                            t1 += v03 * b3;
+                            t2 += v13 * b3;
+
+                            t1 += v04 * b4;
+                            t2 += v14 * b4;
+
+                            C[i][j] += t1;
+                            C[i + 1][j] += t2;
+                        }
+                    }
+                
+                for(int i = 0; i < BS; ++i){
+                    value_type* res_ptr = res->data + (i + bi) * K + bj;
+                    #pragma omp simd
+                    for(int j = 0; j < BS; ++j)
+                        res_ptr[j] += C[i][j];
+                }
+            }
+        }
+    }
+    
+    return res;
+}
+
 const char *test_name;
 double begin_cl;
 mat_t std;
@@ -280,7 +405,7 @@ void end_testcase(mat_ptr res){
 
 int main(){
 
-    // freopen("data/32.txt", "r", stdin);
+    freopen("data/4096.txt", "r", stdin);
     mat_t mat_a, mat_b;
     
     begin_testcase("load matrix");
@@ -306,15 +431,15 @@ int main(){
     //     mat_ptr res3 = mat_mul_trans(mat_a, mat_b);
     // end_testcase(res3);
 
-    begin_testcase("openmp mul");
-        mat_ptr res4 = mat_mul_openmp(mat_a, mat_b);
-    end_testcase(res4);
+    // begin_testcase("simd mul");
+    //     mat_ptr res4 = mat_mul_simd(mat_a, mat_b);
+    // end_testcase(res4);
 
-    begin_testcase("openmp2 mul");
-        mat_ptr res5 = mat_mul_openmp2(mat_a, mat_b);
-    end_testcase(res5);    
+//     begin_testcase("openmp2 mul");
+//         mat_ptr res5 = mat_mul_openmp2(mat_a, mat_b);
+//     end_testcase(res5);    
 
     begin_testcase("block mul");
-        mat_ptr res6 = mat_mul_block(mat_a, mat_b);
+        mat_ptr res6 = mat_mul_block_fast(mat_a, mat_b);
     end_testcase(res6);
 }
