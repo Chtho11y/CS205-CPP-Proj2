@@ -1,4 +1,5 @@
-CPP 第二次project(94/100).
+# CS205-CPP-Proj2
+Yu Shiqi CPP project 2. (94/100)
 
 项目报告见report，阅读pdf以获得更好的阅读体验。
 
